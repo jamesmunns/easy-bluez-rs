@@ -1,34 +1,27 @@
 extern crate easy_bluez;
-use easy_bluez::{BtCharacteristic, BtDevice, BtService, Duration, EasyBluez};
-use std::str::FromStr;
-use easy_bluez::errors::*;
+use easy_bluez::EasyBluez;
+
+use std::sync::mpsc::channel;
+
+extern crate env_logger;
 
 fn main() {
-    let _ = run();
-}
+    env_logger::init().expect("Failed to initalize logging");
+    let (tx, rx) = channel();
 
-fn run() -> Result<()> {
-    let _ez = EasyBluez::new()
-        .scan_interval(Duration::seconds(10))
-        .scan_duration(Duration::seconds(2))
+    let mut ez = EasyBluez::new()
         .run();
 
-    // ez.
+    let _hdl = ez.poll(
+        "CF:75:CE:86:6D:02",                    // MAC Address
+        "00000001-c001-de30-cabb-785feabcd123", // Service
+        "0000c01d-c001-de30-cabb-785feabcd123", // Characteristic
+        false,                                  // Does this device need to be paired?
+        tx,                                     // Where does the data go?
+    ).expect("Bad data!");
 
-    let _device = BtDevice::from_str("CF:75:CE:86:6D:02")?
-        .service(
-            BtService::from_str("00000001-c001-de30-cabb-785feabcd123")?
-                .characteristic(
-                    BtCharacteristic::from_str("0000c01d-c001-de30-cabb-785feabcd123")?,
-                ),
-        )
-        .service(
-            BtService::from_str("0f050001-3225-44b1-b97d-d3274acb29de")?
-                .characteristic(
-                    BtCharacteristic::from_str("0f050002-3225-44b1-b97d-d3274acb29de")?,
-                ),
-        );
-
-    Ok(())
+    // Block between messages
+    while let Ok(data) = rx.recv() {
+        println!("!!!: {:?}", data);
+    }
 }
-

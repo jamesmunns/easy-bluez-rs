@@ -1,18 +1,30 @@
 use std::str::FromStr;
 use std::ops::DerefMut;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::{Receiver, Sender};
 
-use blurz::{GATTCharacteristic, GATTService};
+use blurz::{GATTCharacteristic, GATTService, Device};
 use uuid::Uuid;
 
 use basic_scheduler;
-use whitelist::{BtServices, Whitelist};
-use bt_manager::{AtomicBtDb, ManagedDevice};
+use whitelist::{BtServices, Whitelist, BtMacAddress};
+use bt_manager::{AtomicBtDb, ManagedDevice, SomethingItem};
 use errors::*;
 
 pub struct EndpointsDb {
-    pub db: AtomicBtDb,
-    pub wl: Whitelist,
+    pub rx_polls: Receiver<(SomethingItem, Sender<Box<[u8]>>)>,
+    pub rx_writes: Receiver<(SomethingItem, Receiver<Box<[u8]>>)>,
+
+    pub pending_poll: Vec<(SomethingItem, Sender<Box<[u8]>>)>,
+    pub pending_write: Vec<(SomethingItem, Receiver<Box<[u8]>>)>,
+
+    pub tx_poll_characs: Sender<(GATTCharacteristic, Sender<Box<[u8]>>)>,
+    pub tx_write_characs: Sender<(GATTCharacteristic, Receiver<Box<[u8]>>)>,
+
+    pub rx_devs: Receiver<(BtMacAddress, Device)>,
+    pub devices: HashMap<BtMacAddress, Device>,
+
+    pub endpoint_interval: basic_scheduler::Duration,
 }
 
 pub fn endpoints_task(data: &mut EndpointsDb) -> Option<basic_scheduler::Duration> {
@@ -20,7 +32,7 @@ pub fn endpoints_task(data: &mut EndpointsDb) -> Option<basic_scheduler::Duratio
 
     if let Ok(_) = data.manage_endpoints() {
         // data.manage_new_devices(devs);
-        Some(basic_scheduler::Duration::seconds(5))
+        Some(data.endpoint_interval)
     } else {
         // An error has occurred, bail
         error!("Error, endpoints_task bailing");
@@ -30,74 +42,136 @@ pub fn endpoints_task(data: &mut EndpointsDb) -> Option<basic_scheduler::Duratio
 
 impl EndpointsDb {
     pub fn manage_endpoints(&mut self) -> Result<()> {
-        // Obtain locked inner data structure
-        let mut db_l = self.db.lock().unwrap();
-        let db = db_l.deref_mut();
+        // Add incoming devices
+        while let Ok((mac, dev)) = self.rx_devs.try_recv() {
+            self.devices.insert(mac, dev);
+        }
 
-        for (ref mac_addr, ref mut man_dev) in db.devices.iter_mut() {
-            Self::discover_services(man_dev, self.wl.get_device_btmac(mac_addr).unwrap())?;
+        // Obtain locked inner data structure
+        self.discover_services()
+    }
+
+    pub fn discover_services(&mut self) -> Result<()> {
+
+        self.handle_polls()?;
+        self.handle_writes()?;
+
+        Ok(())
+    }
+
+    pub fn handle_polls(&mut self) -> Result<()> {
+        while let Ok(p) = self.rx_polls.try_recv() {
+            info!("Received Poll request: {:?}", p);
+            self.pending_poll.push(p);
+        }
+
+        let mut rem = vec![];
+        'polls: for (i, &(ref si, ref tx)) in self.pending_poll.iter().enumerate() {
+            let dev = match self.devices.get(&si.mac) {
+                Some(x) => x,
+                _ => continue,
+            };
+
+            let mut svcs = dev.get_gatt_services()?;
+
+            if svcs.len() == 0 {
+                debug!("No services found, waiting");
+                continue;
+            }
+
+            'servs: for serv in svcs.drain(..) {
+                // Discover Services
+                let service = GATTService::new(serv);
+                let serv_uuid =
+                    Uuid::from_str(&service.get_uuid()?).chain_err(|| "failed to parse svc uuid")?;
+
+                if si.svc != serv_uuid  {
+                    continue 'servs;
+                }
+
+                // Discover characteristics
+                'chrcs: for charac_str in service.get_gatt_characteristics()? {
+                    let charac = GATTCharacteristic::new(charac_str);
+                    let chr_uuid =
+                        Uuid::from_str(&charac.get_uuid()?).chain_err(|| "failed to parse chr uuid")?;
+
+                    if si.chrc != chr_uuid {
+                        continue 'chrcs;
+                    }
+
+                    // do something with charac
+                    rem.push(i);
+                    self.tx_poll_characs.send((charac, tx.clone()))
+                        .chain_err(|| "")?;
+                    continue 'polls;
+                }
+            }
+        }
+
+        let mut rmvd: usize = 0;
+        for r in rem {
+            self.pending_poll.remove(r-rmvd);
+            rmvd += 1;
         }
 
         Ok(())
     }
 
-    pub fn discover_services(dev: &mut ManagedDevice, serv_wl: &BtServices) -> Result<()> {
-        let mut svcs = dev.bluez_handle.get_gatt_services()?;
-
-        if svcs.len() == 0 {
-            debug!("No services found, waiting");
-            return Ok(());
+    pub fn handle_writes(&mut self) -> Result<()> {
+        while let Ok(w) = self.rx_writes.try_recv() {
+            self.pending_write.push(w);
         }
 
-        for serv in svcs.drain(..) {
-            // Discover Services
-            let service = GATTService::new(serv);
-            let serv_uuid =
-                Uuid::from_str(&service.get_uuid()?).chain_err(|| "failed to parse svc uuid")?;
+        let mut rem = vec![];
+        let mut charcs_found = vec![];
 
-            if !serv_wl.contains_service(&serv_uuid) {
+        'polls: for (i, &(ref si, ref _rx)) in self.pending_write.iter().enumerate() {
+            let dev = match self.devices.get(&si.mac) {
+                Some(x) => x,
+                _ => continue,
+            };
+
+            let mut svcs = dev.get_gatt_services()?;
+
+            if svcs.len() == 0 {
+                debug!("No services found, waiting");
                 continue;
             }
 
-            // Ensure service exists in cache
-            if !dev.cached_data.contains_key(&serv_uuid) {
-                info!(
-                    "Adding Service {} to {:?}",
-                    serv_uuid.hyphenated(),
-                    dev.bluez_handle
-                );
-                dev.cached_data.insert(serv_uuid.clone(), HashMap::new());
-                dev.service_map.insert(serv_uuid.clone(), service.clone());
-            }
+            'servs: for serv in svcs.drain(..) {
+                // Discover Services
+                let service = GATTService::new(serv);
+                let serv_uuid =
+                    Uuid::from_str(&service.get_uuid()?).chain_err(|| "failed to parse svc uuid")?;
 
-            let wl_chars = serv_wl.get_service(&serv_uuid).unwrap();
-
-            // Discover characteristics
-            for charac_str in service.get_gatt_characteristics()? {
-                let charac = GATTCharacteristic::new(charac_str);
-                let chr_uuid =
-                    Uuid::from_str(&charac.get_uuid()?).chain_err(|| "failed to parse chr uuid")?;
-
-                if !wl_chars.contains_characteristic(&chr_uuid) {
-                    continue;
+                if si.svc != serv_uuid {
+                    continue 'servs;
                 }
 
-                let svc_map_handle = dev.cached_data.get_mut(&serv_uuid).unwrap();
+                // Discover characteristics
+                'chrcs: for charac_str in service.get_gatt_characteristics()? {
+                    let charac = GATTCharacteristic::new(charac_str);
+                    let chr_uuid =
+                        Uuid::from_str(&charac.get_uuid()?).chain_err(|| "failed to parse chr uuid")?;
 
-                if !svc_map_handle.contains_key(&chr_uuid) {
-                    info!(
-                        "Adding Characteristic {} to {} for {:?}",
-                        chr_uuid.hyphenated(),
-                        serv_uuid.hyphenated(),
-                        dev.bluez_handle
-                    );
+                    if si.chrc != chr_uuid {
+                        continue 'chrcs;
+                    }
 
-                    svc_map_handle.insert(chr_uuid.clone(), None);
-
-                    dev.charac_map
-                        .insert((serv_uuid.clone(), chr_uuid.clone()), charac);
+                    // do something with charac
+                    rem.push(i);
+                    charcs_found.push(charac);
+                    continue 'polls;
                 }
             }
+        }
+
+        let mut rmvd: usize = 0;
+        for r in rem {
+            let (_, rx) = self.pending_write.remove(r-rmvd);
+            self.tx_write_characs.send((charcs_found.remove(0), rx))
+                .chain_err(||"")?;
+            rmvd += 1;
         }
 
         Ok(())

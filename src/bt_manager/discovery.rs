@@ -9,14 +9,15 @@ use blurz::{Adapter, Device, DiscoverySession};
 
 use basic_scheduler::Duration;
 use whitelist::BtMacAddress;
-use bt_manager::ManagedDevice;
+use bt_manager::Connectable;
 use errors::*;
 
 pub struct DiscoveryData {
     pub db: HashSet<BtMacAddress>,
     pub wl: HashSet<BtMacAddress>,
     pub receiver: Receiver<BtMacAddress>,
-    pub sender: Sender<ManagedDevice>,
+    pub sender_connect: Sender<Connectable>,
+    pub sender_endpoints: Sender<(BtMacAddress, Device)>,
     pub scan_interval: Duration,
     pub scan_duration: Duration,
 }
@@ -24,15 +25,21 @@ pub struct DiscoveryData {
 pub fn discovery_task(data: &mut DiscoveryData) -> Option<Duration> {
     trace!("Discovery Tick...");
 
+    // Process any new whitelist items
+    while let Ok(new_wl) = data.receiver.try_recv() {
+        info!("Adding {:?}", new_wl);
+        data.wl.insert(new_wl);
+    }
+
     if data.wl.len() == 0 {
         // No whitelist items, no point in scanning
         warn!("No whitelist items, skipping scan");
-        return Some(data.scan_interval.clone());
+        return Some(data.scan_interval);
     }
 
     if let Ok(devs) = data.discover_new() {
         data.manage_new_devices(devs);
-        Some(data.scan_interval.clone())
+        Some(data.scan_interval)
     } else {
         // An error has occurred, bail
         error!("Error, discovery_task bailing");
@@ -47,22 +54,18 @@ impl DiscoveryData {
             return;
         }
 
-        // Process any new whitelist items
-        while let Ok(new_wl) = self.receiver.try_recv() {
-            self.wl.insert(new_wl);
-        }
-
         // Add each new device
         for d in devs {
             let btm = BtMacAddress::from_str(&d.get_address().unwrap()).unwrap();
             if !self.db.contains(&btm) {
                 info!("Adding {:?}", btm);
-                self.db.insert(btm);
+                self.db.insert(btm.clone());
 
                 // trigger a connect, and pass on for later handling
-                let mut new_dev = ManagedDevice::new(d);
+                let mut new_dev = Connectable::new(d.clone());
                 new_dev.connect();
-                self.sender.send(new_dev).unwrap();
+                self.sender_connect.send(new_dev).unwrap();
+                self.sender_endpoints.send((btm, d)).unwrap();
             }
         }
     }
