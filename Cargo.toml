@@ -1,0 +1,31 @@
+[package]
+name = "easy-bluez"
+version = "0.1.0"
+authors = ["James Munns <james.munns@gmail.com>"]
+
+[dependencies]
+mvdb = "0.2.1"
+serde = "1.0"
+serde_derive = "1.0"
+error-chain = "0.10"
+libc = "0.2"
+log = "0.3"
+env_logger = "0.4"
+
+[dependencies.eui48]
+version = "0.3"
+default-features = false
+features = ["serde"]
+
+[dependencies.uuid]
+version = "0.5"
+features = ["v4", "serde"]
+
+[dependencies.blurz]
+path = "./vendor/blurz"
+
+[dependencies.basic_scheduler]
+path = "./vendor/basic_scheduler"
+
+[dev-dependencies]
+serde_json = "1.0"
