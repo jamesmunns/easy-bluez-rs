@@ -1,14 +1,13 @@
 use std::str::FromStr;
-use std::ops::DerefMut;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 
-use blurz::{GATTCharacteristic, GATTService, Device};
+use blurz::{Device, GATTCharacteristic, GATTService};
 use uuid::Uuid;
 
-use basic_scheduler;
-use whitelist::{BtServices, Whitelist, BtMacAddress};
-use bt_manager::{AtomicBtDb, ManagedDevice, SomethingItem};
+use Duration;
+use BtMacAddress;
+use bt_manager::SomethingItem;
 use errors::*;
 
 pub struct EndpointsDb {
@@ -24,10 +23,10 @@ pub struct EndpointsDb {
     pub rx_devs: Receiver<(BtMacAddress, Device)>,
     pub devices: HashMap<BtMacAddress, Device>,
 
-    pub endpoint_interval: basic_scheduler::Duration,
+    pub endpoint_interval: Duration,
 }
 
-pub fn endpoints_task(data: &mut EndpointsDb) -> Option<basic_scheduler::Duration> {
+pub fn endpoints_task(data: &mut EndpointsDb) -> Option<Duration> {
     trace!("Endpoint Tick...");
 
     if let Ok(_) = data.manage_endpoints() {
@@ -52,7 +51,6 @@ impl EndpointsDb {
     }
 
     pub fn discover_services(&mut self) -> Result<()> {
-
         self.handle_polls()?;
         self.handle_writes()?;
 
@@ -85,15 +83,15 @@ impl EndpointsDb {
                 let serv_uuid =
                     Uuid::from_str(&service.get_uuid()?).chain_err(|| "failed to parse svc uuid")?;
 
-                if si.svc != serv_uuid  {
+                if si.svc != serv_uuid {
                     continue 'servs;
                 }
 
                 // Discover characteristics
                 'chrcs: for charac_str in service.get_gatt_characteristics()? {
                     let charac = GATTCharacteristic::new(charac_str);
-                    let chr_uuid =
-                        Uuid::from_str(&charac.get_uuid()?).chain_err(|| "failed to parse chr uuid")?;
+                    let chr_uuid = Uuid::from_str(&charac.get_uuid()?)
+                        .chain_err(|| "failed to parse chr uuid")?;
 
                     if si.chrc != chr_uuid {
                         continue 'chrcs;
@@ -101,7 +99,8 @@ impl EndpointsDb {
 
                     // do something with charac
                     rem.push(i);
-                    self.tx_poll_characs.send((charac, tx.clone()))
+                    self.tx_poll_characs
+                        .send((charac, tx.clone()))
                         .chain_err(|| "")?;
                     continue 'polls;
                 }
@@ -110,7 +109,7 @@ impl EndpointsDb {
 
         let mut rmvd: usize = 0;
         for r in rem {
-            self.pending_poll.remove(r-rmvd);
+            self.pending_poll.remove(r - rmvd);
             rmvd += 1;
         }
 
@@ -151,8 +150,8 @@ impl EndpointsDb {
                 // Discover characteristics
                 'chrcs: for charac_str in service.get_gatt_characteristics()? {
                     let charac = GATTCharacteristic::new(charac_str);
-                    let chr_uuid =
-                        Uuid::from_str(&charac.get_uuid()?).chain_err(|| "failed to parse chr uuid")?;
+                    let chr_uuid = Uuid::from_str(&charac.get_uuid()?)
+                        .chain_err(|| "failed to parse chr uuid")?;
 
                     if si.chrc != chr_uuid {
                         continue 'chrcs;
@@ -168,9 +167,10 @@ impl EndpointsDb {
 
         let mut rmvd: usize = 0;
         for r in rem {
-            let (_, rx) = self.pending_write.remove(r-rmvd);
-            self.tx_write_characs.send((charcs_found.remove(0), rx))
-                .chain_err(||"")?;
+            let (_, rx) = self.pending_write.remove(r - rmvd);
+            self.tx_write_characs
+                .send((charcs_found.remove(0), rx))
+                .chain_err(|| "")?;
             rmvd += 1;
         }
 

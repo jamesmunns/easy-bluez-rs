@@ -1,14 +1,13 @@
+use std::collections::HashSet;
 use std::str::FromStr;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration as OldDuration;
-use std::ops::DerefMut;
-use std::sync::mpsc::{Receiver, Sender};
-use std::collections::HashSet;
 
 use blurz::{Adapter, Device, DiscoverySession};
 
-use basic_scheduler::Duration;
-use whitelist::BtMacAddress;
+use Duration;
+use BtMacAddress;
 use bt_manager::Connectable;
 use errors::*;
 

@@ -1,11 +1,5 @@
-#![allow(unused_doc_comment)]
-#![allow(unused_extern_crates)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 extern crate basic_scheduler;
 extern crate blurz;
-extern crate env_logger;
 #[macro_use]
 extern crate error_chain;
 extern crate eui48;
@@ -16,25 +10,42 @@ extern crate mvdb;
 extern crate serde_derive;
 extern crate uuid;
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-
-use basic_scheduler::{BasicEvent, Scheduler};
-
 pub mod errors;
-mod whitelist;
 mod bt_manager;
 mod api;
 
 pub use api::*;
 pub use basic_scheduler::Duration;
-pub use whitelist::{BtCharacteristic, BtDevice, BtMacAddress, BtService};
 pub use uuid::Uuid;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+use std::hash::{Hash, Hasher};
+use std::str::FromStr;
+
+use errors::*;
+use eui48::MacAddress;
+
+impl Hash for BtMacAddress {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.as_bytes().hash(state)
     }
 }
+
+impl From<MacAddress> for BtMacAddress {
+    fn from(other: MacAddress) -> Self {
+        BtMacAddress(other)
+    }
+}
+
+impl FromStr for BtMacAddress {
+    type Err = Error;
+    /// Create a MacAddress from String
+    fn from_str(us: &str) -> Result<BtMacAddress> {
+        Ok(Self {
+            0: MacAddress::parse_str(us).chain_err(|| "Not a MAC address!")?,
+        })
+    }
+}
+
+
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+pub struct BtMacAddress(MacAddress);

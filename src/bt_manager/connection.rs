@@ -1,13 +1,11 @@
-use std::ops::DerefMut;
-use std::time::{Duration, Instant};
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::Instant;
+use std::time::Duration as OldDuration;
 
-use blurz::Adapter;
-use basic_scheduler;
+use Duration;
+use bt_manager::Connectable;
 
 use errors::*;
-use bt_manager::Connectable;
-use std::collections::HashSet;
 
 pub struct ConnectionDb {
     pub incoming: Receiver<Connectable>,
@@ -16,10 +14,10 @@ pub struct ConnectionDb {
     // TODO sender for connect events
     // TODO sender for disconnect
     pub db: Vec<Connectable>,
-    pub connect_interval: basic_scheduler::Duration,
+    pub connect_interval: Duration,
 }
 
-pub fn connect_task(data: &mut ConnectionDb) -> Option<basic_scheduler::Duration> {
+pub fn connect_task(data: &mut ConnectionDb) -> Option<Duration> {
     trace!("Connect Tick...");
 
     match data.manage_connection() {
@@ -39,7 +37,7 @@ impl ConnectionDb {
         }
 
         for man_dev in self.db.iter_mut() {
-            let too_idle = man_dev.last_connected.elapsed() > Duration::from_secs(30);
+            let too_idle = man_dev.last_connected.elapsed() > OldDuration::from_secs(30);
 
             let is_connected = if man_dev.bluez_handle.is_connected()? {
                 trace!("{} is connected :)", man_dev.mac_addr);

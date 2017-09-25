@@ -2,8 +2,8 @@
 
 use basic_scheduler::{BasicEvent, Duration, Scheduler};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use whitelist::BtMacAddress;
-use std::collections::{HashSet, HashMap};
+use BtMacAddress;
+use std::collections::{HashMap, HashSet};
 use errors::*;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -14,6 +14,7 @@ use bt_manager::discovery::{discovery_task, DiscoveryData};
 use bt_manager::connection::{connect_task, ConnectionDb};
 use bt_manager::endpoints::{endpoints_task, EndpointsDb};
 use bt_manager::data_poll::{data_poll_task, DataDb};
+use bt_manager::data_write::{data_write_task, DataWDb};
 
 pub struct EasyBluez {
     scan_interval: Duration,
@@ -21,6 +22,7 @@ pub struct EasyBluez {
     connect_interval: Duration,
     endpoint_interval: Duration,
     poll_interval: Duration,
+    write_interval: Duration,
 }
 
 pub struct EasyBluezHandle {
@@ -28,6 +30,7 @@ pub struct EasyBluezHandle {
     poll_sender: Sender<(SomethingItem, Sender<Box<[u8]>>)>,
     write_sender: Sender<(SomethingItem, Receiver<Box<[u8]>>)>,
     scheduler: thread::JoinHandle<()>,
+    data_scheduler: thread::JoinHandle<()>,
 
     _rx: Receiver<(String, bool)>,
 }
@@ -52,8 +55,7 @@ impl EasyBluezHandle {
             chrc: chrc,
         };
 
-        self.write_sender.send((si, rxer))
-            .chain_err(|| "")?;
+        self.write_sender.send((si, rxer)).chain_err(|| "")?;
 
         Ok(())
     }
@@ -78,8 +80,7 @@ impl EasyBluezHandle {
             chrc: chrc,
         };
 
-        self.poll_sender.send((si, dest))
-            .chain_err(|| "")?;
+        self.poll_sender.send((si, dest)).chain_err(|| "")?;
 
         Ok(())
     }
@@ -89,10 +90,11 @@ impl EasyBluez {
     pub fn new() -> Self {
         EasyBluez {
             scan_interval: Duration::seconds(10),
-            scan_duration: Duration::seconds(5),
+            scan_duration: Duration::milliseconds(1000),
             connect_interval: Duration::seconds(3),
             endpoint_interval: Duration::seconds(3),
-            poll_interval: Duration::seconds(2),
+            poll_interval: Duration::milliseconds(1000),
+            write_interval: Duration::milliseconds(100),
         }
     }
 
@@ -186,7 +188,6 @@ impl EasyBluez {
 
                 rx_devs: rx_edpts,
                 devices: HashMap::new(),
-
             },
         };
 
@@ -199,16 +200,33 @@ impl EasyBluez {
             },
         };
 
+        let write_event = BasicEvent {
+            task: |s: &mut DataWDb| data_write_task(s),
+            state: DataWDb {
+                write_interval: self.write_interval,
+                writes: Vec::new(),
+                write_rx: rx_write_characs,
+            },
+        };
+
         let mut scheduler = Scheduler::new();
         let hdl = scheduler.add_handle();
         hdl.send(Box::new(discover_event)).unwrap();
         hdl.send(Box::new(connection_event)).unwrap();
         hdl.send(Box::new(endpoints_event)).unwrap();
-        hdl.send(Box::new(poll_event)).unwrap();
+
+        let mut data_scheduler = Scheduler::new();
+        let d_hdl = data_scheduler.add_handle();
+
+        d_hdl.send(Box::new(poll_event)).unwrap();
+        d_hdl.send(Box::new(write_event)).unwrap();
 
         EasyBluezHandle {
             scheduler: thread::spawn(move || {
                 scheduler.run();
+            }),
+            data_scheduler: thread::spawn(move || {
+                data_scheduler.run();
             }),
             mac_sender: tx_macs,
             poll_sender: tx_poll,

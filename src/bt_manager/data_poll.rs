@@ -1,19 +1,17 @@
-use std::time::{Duration, Instant};
-use std::ops::DerefMut;
+use std::sync::mpsc::{Receiver, Sender};
 
-use basic_scheduler;
-use std::collections::HashMap;
-use errors::*;
+use Duration;
 use blurz::GATTCharacteristic;
-use std::sync::mpsc::{Sender, Receiver};
+
+use errors::*;
 
 pub struct DataDb {
-    pub poll_interval: basic_scheduler::Duration,
+    pub poll_interval: Duration,
     pub poll_rx: Receiver<(GATTCharacteristic, Sender<Box<[u8]>>)>,
     pub polls: Vec<(GATTCharacteristic, Sender<Box<[u8]>>)>,
 }
 
-pub fn data_poll_task(data: &mut DataDb) -> Option<basic_scheduler::Duration> {
+pub fn data_poll_task(data: &mut DataDb) -> Option<Duration> {
     trace!("DataPoll Tick...");
 
     if let Ok(_) = data.poll_data() {
@@ -35,7 +33,7 @@ impl DataDb {
             match blurz_chr.read_value(None) {
                 Ok(new_data) => {
                     txer.send(new_data.into_boxed_slice()).unwrap();
-                },
+                }
                 Err(e) => {
                     error!("Failed to read, {:?}", e);
                 }
@@ -45,48 +43,3 @@ impl DataDb {
         Ok(())
     }
 }
-
-// // // Obtain locked inner data structure
-// let mut db_l = self.db.lock().unwrap();
-// let db = db_l.deref_mut();
-
-// for (_bt_mac, dev) in db.devices.iter_mut() {
-//     for (svc, characs) in dev.cached_data.iter_mut() {
-//         for (charac, data) in characs {
-//             // get the characteristic
-
-//             let bluez_charac = dev.charac_map.get(&(svc.clone(), charac.clone())).unwrap();
-//             match bluez_charac.read_value(None) {
-//                 Ok(new_data) => {
-//                     debug!("Updated {}:{}", svc.hyphenated(), charac.hyphenated());
-//                     *data = Some(PolledData {
-//                         time: Instant::now(),
-//                         data: new_data.into_boxed_slice(),
-//                     });
-//                 }
-//                 Err(e) => {
-//                     error!(
-//                         "Failed to read {}:{} => {}",
-//                         svc.hyphenated(),
-//                         charac.hyphenated(),
-//                         e
-//                     );
-
-//                     // Failed to poll. Is the data stale?
-//                     let timed_out = if let &mut Some(ref inner_data) = data {
-//                         inner_data.time.elapsed() > Duration::from_secs(10)
-//                     } else {
-//                         // No data can't time out
-//                         false
-//                     };
-
-//                     if timed_out {
-//                         *data = None;
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
-// Ok(())
