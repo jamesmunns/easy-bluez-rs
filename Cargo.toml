@@ -2,6 +2,11 @@
 name = "easy-bluez"
 version = "0.1.0"
 authors = ["James Munns <james.munns@gmail.com>"]
+description = "An easy interface for BlueZ, based on blurz"
+license = "MIT"
+documentation = "https://docs.rs/easy-bluez"
+homepage = "https://docs.rs/easy-bluez"
+repository = "https://github.com/jamesmunns/easy-bluez-rs"
 
 [dependencies]
 mvdb = "0.2.1"
