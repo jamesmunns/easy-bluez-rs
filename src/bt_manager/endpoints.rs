@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 
-use blurz::{Device, GATTCharacteristic, GATTService};
+use blurz::{BluetoothDevice, BluetoothGATTCharacteristic, BluetoothGATTService};
 use uuid::Uuid;
 
 use Duration;
@@ -17,11 +17,11 @@ pub struct EndpointsDb {
     pub pending_poll: Vec<(SomethingItem, Sender<Box<[u8]>>)>,
     pub pending_write: Vec<(SomethingItem, Receiver<Box<[u8]>>)>,
 
-    pub tx_poll_characs: Sender<(GATTCharacteristic, Sender<Box<[u8]>>)>,
-    pub tx_write_characs: Sender<(GATTCharacteristic, Receiver<Box<[u8]>>)>,
+    pub tx_poll_characs: Sender<(BluetoothGATTCharacteristic, Sender<Box<[u8]>>)>,
+    pub tx_write_characs: Sender<(BluetoothGATTCharacteristic, Receiver<Box<[u8]>>)>,
 
-    pub rx_devs: Receiver<(BtMacAddress, Device)>,
-    pub devices: HashMap<BtMacAddress, Device>,
+    pub rx_devs: Receiver<(BtMacAddress, BluetoothDevice)>,
+    pub devices: HashMap<BtMacAddress, BluetoothDevice>,
 
     pub endpoint_interval: Duration,
 }
@@ -70,7 +70,8 @@ impl EndpointsDb {
                 _ => continue,
             };
 
-            let mut svcs = dev.get_gatt_services()?;
+            let mut svcs = dev.get_gatt_services()
+                .map_err(|e| e.to_string())?;
 
             if svcs.len() == 0 {
                 debug!("No services found, waiting");
@@ -79,18 +80,18 @@ impl EndpointsDb {
 
             'servs: for serv in svcs.drain(..) {
                 // Discover Services
-                let service = GATTService::new(serv);
+                let service = BluetoothGATTService::new(serv);
                 let serv_uuid =
-                    Uuid::from_str(&service.get_uuid()?).chain_err(|| "failed to parse svc uuid")?;
+                    Uuid::from_str(&service.get_uuid().map_err(|e| e.to_string())?).chain_err(|| "failed to parse svc uuid")?;
 
                 if si.svc != serv_uuid {
                     continue 'servs;
                 }
 
                 // Discover characteristics
-                'chrcs: for charac_str in service.get_gatt_characteristics()? {
-                    let charac = GATTCharacteristic::new(charac_str);
-                    let chr_uuid = Uuid::from_str(&charac.get_uuid()?)
+                'chrcs: for charac_str in service.get_gatt_characteristics().map_err(|e| e.to_string())? {
+                    let charac = BluetoothGATTCharacteristic::new(charac_str);
+                    let chr_uuid = Uuid::from_str(&charac.get_uuid().map_err(|e| e.to_string())?)
                         .chain_err(|| "failed to parse chr uuid")?;
 
                     if si.chrc != chr_uuid {
@@ -130,7 +131,7 @@ impl EndpointsDb {
                 _ => continue,
             };
 
-            let mut svcs = dev.get_gatt_services()?;
+            let mut svcs = dev.get_gatt_services().map_err(|e| e.to_string())?;
 
             if svcs.len() == 0 {
                 debug!("No services found, waiting");
@@ -139,18 +140,18 @@ impl EndpointsDb {
 
             'servs: for serv in svcs.drain(..) {
                 // Discover Services
-                let service = GATTService::new(serv);
+                let service = BluetoothGATTService::new(serv);
                 let serv_uuid =
-                    Uuid::from_str(&service.get_uuid()?).chain_err(|| "failed to parse svc uuid")?;
+                    Uuid::from_str(&service.get_uuid().map_err(|e| e.to_string())?).chain_err(|| "failed to parse svc uuid")?;
 
                 if si.svc != serv_uuid {
                     continue 'servs;
                 }
 
                 // Discover characteristics
-                'chrcs: for charac_str in service.get_gatt_characteristics()? {
-                    let charac = GATTCharacteristic::new(charac_str);
-                    let chr_uuid = Uuid::from_str(&charac.get_uuid()?)
+                'chrcs: for charac_str in service.get_gatt_characteristics().map_err(|e| e.to_string())? {
+                    let charac = BluetoothGATTCharacteristic::new(charac_str);
+                    let chr_uuid = Uuid::from_str(&charac.get_uuid().map_err(|e| e.to_string())?)
                         .chain_err(|| "failed to parse chr uuid")?;
 
                     if si.chrc != chr_uuid {

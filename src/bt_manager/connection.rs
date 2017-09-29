@@ -39,7 +39,7 @@ impl ConnectionDb {
         for man_dev in self.db.iter_mut() {
             let too_idle = man_dev.last_connected.elapsed() > OldDuration::from_secs(30);
 
-            let is_connected = if man_dev.bluez_handle.is_connected()? {
+            let is_connected = if man_dev.bluez_handle.is_connected().map_err(|e| e.to_string())? {
                 trace!("{} is connected :)", man_dev.mac_addr);
                 man_dev.last_connected = Instant::now();
                 true

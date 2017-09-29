@@ -4,7 +4,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration as OldDuration;
 
-use blurz::{Adapter, Device, DiscoverySession};
+use blurz::{BluetoothAdapter, BluetoothDevice, BluetoothDiscoverySession};
 
 use Duration;
 use BtMacAddress;
@@ -16,7 +16,7 @@ pub struct DiscoveryData {
     pub wl: HashSet<BtMacAddress>,
     pub receiver: Receiver<BtMacAddress>,
     pub sender_connect: Sender<Connectable>,
-    pub sender_endpoints: Sender<(BtMacAddress, Device)>,
+    pub sender_endpoints: Sender<(BtMacAddress, BluetoothDevice)>,
     pub scan_interval: Duration,
     pub scan_duration: Duration,
 }
@@ -47,7 +47,7 @@ pub fn discovery_task(data: &mut DiscoveryData) -> Option<Duration> {
 }
 
 impl DiscoveryData {
-    fn manage_new_devices(&mut self, devs: Vec<Device>) {
+    fn manage_new_devices(&mut self, devs: Vec<BluetoothDevice>) {
         // Avoid action if no devices found
         if devs.len() == 0 {
             return;
@@ -69,20 +69,24 @@ impl DiscoveryData {
         }
     }
 
-    fn discover_new(&self) -> Result<Vec<Device>> {
-        let adapter: Adapter = Adapter::init()?;
+    fn discover_new(&self) -> Result<Vec<BluetoothDevice>> {
+        let adapter: BluetoothAdapter = BluetoothAdapter::init()
+            .map_err(|e| e.to_string())?;
 
-        let session = DiscoverySession::create_session(adapter.get_id())?;
+        let session = BluetoothDiscoverySession::create_session(adapter.get_id())
+            .map_err(|e| e.to_string())?;
         thread::sleep(OldDuration::from_millis(200));
 
-        session.start_discovery()?;
-        thread::sleep(Duration::to_std(&self.scan_duration).chain_err(|| "")?);
+        session.start_discovery()
+            .map_err(|e| e.to_string())?;
+        thread::sleep(Duration::to_std(&self.scan_duration).map_err(|e| e.to_string())?);
 
-        let mut devices = adapter.get_device_list()?;
+        let mut devices = adapter.get_device_list()
+            .map_err(|e| e.to_string())?;
         let mut new_devices = vec![];
 
         for d in devices.drain(..) {
-            let device = Device::new(d);
+            let device = BluetoothDevice::new(d);
 
             match device.get_address() {
                 Ok(ref id) if self.wl.contains(&BtMacAddress::from_str(id).unwrap()) => {
@@ -98,7 +102,8 @@ impl DiscoveryData {
             }
         }
 
-        session.stop_discovery()?;
+        session.stop_discovery()
+            .map_err(|e| e.to_string())?;
 
         Ok(new_devices)
     }

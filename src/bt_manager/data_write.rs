@@ -1,14 +1,14 @@
 use std::sync::mpsc::Receiver;
 
 use Duration;
-use blurz::GATTCharacteristic;
+use blurz::BluetoothGATTCharacteristic;
 
 use errors::*;
 
 pub struct DataWDb {
     pub write_interval: Duration,
-    pub write_rx: Receiver<(GATTCharacteristic, Receiver<Box<[u8]>>)>,
-    pub writes: Vec<(GATTCharacteristic, Receiver<Box<[u8]>>)>,
+    pub write_rx: Receiver<(BluetoothGATTCharacteristic, Receiver<Box<[u8]>>)>,
+    pub writes: Vec<(BluetoothGATTCharacteristic, Receiver<Box<[u8]>>)>,
 }
 
 pub fn data_write_task(data: &mut DataWDb) -> Option<Duration> {
@@ -31,7 +31,8 @@ impl DataWDb {
 
         for &(ref blurz_chr, ref rxer) in self.writes.iter() {
             if let Ok(msg) = rxer.try_recv() {
-                blurz_chr.write_value(msg.to_vec(), None)?;
+                blurz_chr.write_value(msg.to_vec())
+                    .map_err(|e| e.to_string())?;
             }
         }
 

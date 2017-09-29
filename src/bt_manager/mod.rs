@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use blurz::Device;
+use blurz::BluetoothDevice;
 use uuid::Uuid;
 use BtMacAddress;
 
@@ -20,13 +20,13 @@ pub struct SomethingItem {
 
 
 pub struct Connectable {
-    pub bluez_handle: Device,
+    pub bluez_handle: BluetoothDevice,
     pub mac_addr: String,
     pub last_connected: Instant,
 }
 
 impl Connectable {
-    pub fn new(dev: Device) -> Self {
+    pub fn new(dev: BluetoothDevice) -> Self {
         Self {
             mac_addr: dev.get_address().unwrap_or(String::from("Unknown")),
             bluez_handle: dev,

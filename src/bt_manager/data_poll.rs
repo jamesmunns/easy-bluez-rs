@@ -1,14 +1,14 @@
 use std::sync::mpsc::{Receiver, Sender};
 
 use Duration;
-use blurz::GATTCharacteristic;
+use blurz::BluetoothGATTCharacteristic;
 
 use errors::*;
 
 pub struct DataDb {
     pub poll_interval: Duration,
-    pub poll_rx: Receiver<(GATTCharacteristic, Sender<Box<[u8]>>)>,
-    pub polls: Vec<(GATTCharacteristic, Sender<Box<[u8]>>)>,
+    pub poll_rx: Receiver<(BluetoothGATTCharacteristic, Sender<Box<[u8]>>)>,
+    pub polls: Vec<(BluetoothGATTCharacteristic, Sender<Box<[u8]>>)>,
 }
 
 pub fn data_poll_task(data: &mut DataDb) -> Option<Duration> {
@@ -30,7 +30,7 @@ impl DataDb {
         }
 
         for &(ref blurz_chr, ref txer) in self.polls.iter() {
-            match blurz_chr.read_value(None) {
+            match blurz_chr.read_value() {
                 Ok(new_data) => {
                     txer.send(new_data.into_boxed_slice()).unwrap();
                 }
