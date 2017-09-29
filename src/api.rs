@@ -1,5 +1,3 @@
-// #![allow(unused_variables)]
-
 use basic_scheduler::{BasicEvent, Duration, Scheduler};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use BtMacAddress;
@@ -29,20 +27,21 @@ pub struct EasyBluezHandle {
     mac_sender: Sender<BtMacAddress>,
     poll_sender: Sender<(SomethingItem, Sender<Box<[u8]>>)>,
     write_sender: Sender<(SomethingItem, Receiver<Box<[u8]>>)>,
-    scheduler: thread::JoinHandle<()>,
-    data_scheduler: thread::JoinHandle<()>,
+    _scheduler: thread::JoinHandle<()>,
+    _data_scheduler: thread::JoinHandle<()>,
 
     _rx: Receiver<(String, bool)>,
 }
 
 impl EasyBluezHandle {
     pub fn writeable(
-        &mut self,
+        &self,
         mac_s: &str,
         svc_s: &str,
         chrc_s: &str,
-        rxer: Receiver<Box<[u8]>>,
-    ) -> Result<()> {
+    ) -> Result<Sender<Box<[u8]>>> {
+        let (tx, rx) = channel();
+
         let mac = BtMacAddress::from_str(mac_s)?;
         let svc = Uuid::from_str(svc_s).chain_err(|| "not a UUID!")?;
         let chrc = Uuid::from_str(chrc_s).chain_err(|| "not a UUID!")?;
@@ -55,19 +54,19 @@ impl EasyBluezHandle {
             chrc: chrc,
         };
 
-        self.write_sender.send((si, rxer)).chain_err(|| "")?;
+        self.write_sender.send((si, rx)).chain_err(|| "")?;
 
-        Ok(())
+        Ok(tx)
     }
 
     pub fn poll(
-        &mut self,
+        &self,
         mac_s: &str,
         svc_s: &str,
         chrc_s: &str,
-        needs_pair: bool,
-        dest: Sender<Box<[u8]>>,
-    ) -> Result<()> {
+    ) -> Result<Receiver<Box<[u8]>>> {
+        let (tx, rx) = channel();
+
         let mac = BtMacAddress::from_str(mac_s)?;
         let svc = Uuid::from_str(svc_s).chain_err(|| "not a UUID!")?;
         let chrc = Uuid::from_str(chrc_s).chain_err(|| "not a UUID!")?;
@@ -80,9 +79,9 @@ impl EasyBluezHandle {
             chrc: chrc,
         };
 
-        self.poll_sender.send((si, dest)).chain_err(|| "")?;
+        self.poll_sender.send((si, tx)).chain_err(|| "")?;
 
-        Ok(())
+        Ok(rx)
     }
 }
 
@@ -222,10 +221,10 @@ impl EasyBluez {
         d_hdl.send(Box::new(write_event)).unwrap();
 
         EasyBluezHandle {
-            scheduler: thread::spawn(move || {
+            _scheduler: thread::spawn(move || {
                 scheduler.run();
             }),
-            data_scheduler: thread::spawn(move || {
+            _data_scheduler: thread::spawn(move || {
                 data_scheduler.run();
             }),
             mac_sender: tx_macs,
